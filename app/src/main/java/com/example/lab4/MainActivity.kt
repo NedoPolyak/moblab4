@@ -1,5 +1,6 @@
 package com.example.lab4
-
+import android.annotation.SuppressLint
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,6 +9,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,9 +40,16 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStore
+import androidx.lifecycle.ViewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -43,6 +57,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.lab4.ui.theme.Lab4Theme
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_preferences")
 
 
 class MainActivity : ComponentActivity() {
@@ -55,8 +75,16 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(navController: NavController) {
+fun MainScreen(
+    navController: NavController,
+    sharedViewModel: SharedViewModel
+) {
     val palette = LocalPalette.current
+    val selectedMeditation by sharedViewModel.selectedItem.collectAsState()
+    val userName by sharedViewModel.userName.collectAsState()
+    var txt = "[Имя]"
+    if(userName !="")
+        txt = userName
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -93,12 +121,19 @@ fun MainScreen(navController: NavController) {
 
         Spacer(modifier = Modifier.height(64.dp))
 
-        Text(text = "Добро пожаловать, [Имя]!", fontSize = 20.sp)
+
+        Text(text = "Добро пожаловать, $txt!", fontSize = 20.sp)
 
         Spacer(modifier = Modifier.height(72.dp))
 
         Button(
-            onClick = { navController.navigate("meditation") },
+            onClick = {
+                if (selectedMeditation != null) {
+                    navController.navigate("meditation/${selectedMeditation!!.id}")
+                } else {
+                    println("Медитация не выбрана")
+                }
+            },
             colors = ButtonDefaults.buttonColors(containerColor = palette.secondary),
             shape = RoundedCornerShape(8.dp)
         ) {
@@ -110,55 +145,114 @@ fun MainScreen(navController: NavController) {
 }
 
 @Composable
-fun MeditationLibraryScreen(navController: NavController) {
+fun MeditationLibraryScreen(
+    navController: NavController,
+    sharedViewModel: SharedViewModel
+) {
     val palette = LocalPalette.current
+    val viewModel: MeditationLibraryViewModel = viewModel()
+    val meditations by viewModel.meditations.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val selectedMeditation by sharedViewModel.selectedItem.collectAsState()
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         TextField(
-            value = "",
-            onValueChange = {},
+            value = searchQuery,
+            onValueChange = { viewModel.onSearchQueryChanged(it) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("Поиск...") }
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            repeat(3) {
-                Row(
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            items(viewModel.getFilteredMeditations()) { meditation ->
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    repeat(2) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(
-                                modifier = Modifier
-                                    .size(100.dp)
-                                    .background(Color.LightGray, RoundedCornerShape(8.dp))
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Button(
-                                onClick = { navController.navigate("meditation") },
-                                colors = ButtonDefaults.buttonColors(containerColor = palette.secondary)
-                            ) {
-                                Text(text = "Начать")
-                            }
+                    MeditationItem(
+                        meditation = meditation,
+                        isSelected = selectedMeditation?.id == meditation.id,
+                        onSelected = {
+                            viewModel.onMeditationSelected(meditation)
+                            sharedViewModel.selectItem(meditation)
                         }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            viewModel.onMeditationSelected(meditation)
+                            sharedViewModel.selectItem(meditation)
+                            navController.navigate("meditation/${meditation.id}")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = palette.primary)
+                    ) {
+                        Text(text = "Начать")
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
             }
         }
-
-        Spacer(modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
-fun MusicScreen(navController: NavController) {
+fun MeditationItem(
+    meditation: Meditation,
+    isSelected: Boolean,
+    onSelected: () -> Unit
+) {
     val palette = LocalPalette.current
+    val backgroundColor = if (isSelected) palette.secondary else Color.LightGray
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(backgroundColor, RoundedCornerShape(8.dp))
+            .clickable { onSelected() }
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(100.dp)
+                .background(backgroundColor, RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "*Тут должна была быть картинка*",
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = meditation.name,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+fun MusicScreen(
+    navController: NavController,
+    sharedViewModel: SharedViewModel
+) {
+    val palette = LocalPalette.current
+    val selectedMeditation by sharedViewModel.selectedItem.collectAsState()
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -202,17 +296,27 @@ fun MusicScreen(navController: NavController) {
             }
         }
         Spacer(modifier = Modifier.height(100.dp))
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Box(
-                modifier = Modifier
-                    .width(200.dp)
-                    .height(160.dp)
-                    .background(Color.LightGray, RoundedCornerShape(8.dp))
-            )
+            if (selectedMeditation != null) {
+                MeditationItem(
+                    meditation = selectedMeditation!!,
+                    isSelected = true,
+                    onSelected = { /* Ничего не делаем, так как это экран музыки */ }
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .width(200.dp)
+                        .height(160.dp)
+                        .background(Color.LightGray, RoundedCornerShape(8.dp))
+                )
+            }
         }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(text = "0:00", fontSize = 16.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
@@ -220,15 +324,21 @@ fun MusicScreen(navController: NavController) {
         Slider(value = 0f, onValueChange = {})
 
         Spacer(modifier = Modifier.height(40.dp))
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             Button(
-                onClick = { navController.navigate("meditation") },
+                onClick = {
+                    if (selectedMeditation != null) {
+                        navController.navigate("meditation/${selectedMeditation!!.id}")
+                    } else {
+                        println("Медитация не выбрана")
+                    }
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = palette.secondary),
                 shape = RoundedCornerShape(8.dp)
-
             ) {
                 Text(text = "Начать Медитацию")
             }
@@ -300,13 +410,15 @@ fun ProgressScreen(navController: NavController) {
 @Composable
 fun ProfileScreen(
     navController: NavController,
-    onPaletteChange: (PaletteOption) -> Unit
+    onPaletteChange: (PaletteOption) -> Unit,
+    sharedViewModel: SharedViewModel,
+    profileViewModel: ProfileViewModel
 ) {
-    var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var remindMeditation by remember { mutableStateOf(false) }
-    var notifyNewMeditations by remember { mutableStateOf(false) }
-    var notifyNewMusic by remember { mutableStateOf(false) }
+    val name by profileViewModel.name.collectAsState()
+    val email by profileViewModel.email.collectAsState()
+    val remindMeditation by profileViewModel.remindMeditation.collectAsState()
+    val notifyNewMeditations by profileViewModel.notifyNewMeditations.collectAsState()
+    val notifyNewMusic by profileViewModel.notifyNewMusic.collectAsState()
 
     Column(
         modifier = Modifier
@@ -320,7 +432,7 @@ fun ProfileScreen(
 
         TextField(
             value = name,
-            onValueChange = { name = it },
+            onValueChange = { profileViewModel.updateName(it) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("Имя") }
         )
@@ -329,7 +441,7 @@ fun ProfileScreen(
 
         TextField(
             value = email,
-            onValueChange = { email = it },
+            onValueChange = { profileViewModel.updateEmail(it) },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("Email") }
         )
@@ -347,7 +459,7 @@ fun ProfileScreen(
             Text(text = "Напоминать о медитации?")
             Switch(
                 checked = remindMeditation,
-                onCheckedChange = { remindMeditation = it },
+                onCheckedChange = { profileViewModel.updateRemindMeditation(it) },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = LocalPalette.current.secondary,
                     checkedTrackColor = LocalPalette.current.primary,
@@ -364,7 +476,7 @@ fun ProfileScreen(
             Text(text = "Уведомлять о новых медитациях?")
             Switch(
                 checked = notifyNewMeditations,
-                onCheckedChange = { notifyNewMeditations = it },
+                onCheckedChange = { profileViewModel.updateNotifyNewMeditations(it) },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = LocalPalette.current.secondary,
                     checkedTrackColor = LocalPalette.current.primary,
@@ -381,7 +493,7 @@ fun ProfileScreen(
             Text(text = "Уведомлять о новой музыке?")
             Switch(
                 checked = notifyNewMusic,
-                onCheckedChange = { notifyNewMusic = it },
+                onCheckedChange = { profileViewModel.updateNotifyNewMusic(it) },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = LocalPalette.current.secondary,
                     checkedTrackColor = LocalPalette.current.primary,
@@ -400,6 +512,18 @@ fun ProfileScreen(
             ColorCircle(PaletteOption.Option1, onPaletteChange)
             ColorCircle(PaletteOption.Option2, onPaletteChange)
             ColorCircle(PaletteOption.Option3, onPaletteChange)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = {
+                sharedViewModel.updateUserName(name)
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = LocalPalette.current.secondary),
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        ) {
+            Text(text = "Сохранить", color = Color.White)
         }
 
         Spacer(modifier = Modifier.weight(1f))
@@ -438,26 +562,53 @@ val LocalPalette = staticCompositionLocalOf {
         secondary = Color(0xFFCC6FC6)
     )
 }
+
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
-fun MeditationScreen(navController: NavController) {
+fun MeditationScreen(
+    navController: NavController,
+    meditationId: Int?,
+    viewModel: MeditationLibraryViewModel = viewModel()
+) {
     val palette = LocalPalette.current
+
+    val selectedMeditation = viewModel.meditations.value.find { it.id == meditationId }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(palette.primary) // Фон экрана медитации
+            .background(palette.primary)
             .padding(16.dp)
     ) {
-        Text(text = "Медитация", fontSize = 24.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Text(
+            text = "Медитация",
+            fontSize = 24.sp,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Text(text = "0:00", fontSize = 48.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+        if (selectedMeditation != null) {
+            MeditationItem(
+                meditation = selectedMeditation,
+                isSelected = true,
+                onSelected = { /* Ничего не делаем, так как это экран медитации */ }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Text(
+            text = "0:00",
+            fontSize = 48.sp,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
 
         Spacer(modifier = Modifier.height(32.dp))
 
         Button(
             onClick = { navController.popBackStack() },
-            colors = ButtonDefaults.buttonColors(containerColor = palette.secondary), // Активный цвет
+            colors = ButtonDefaults.buttonColors(containerColor = palette.secondary),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.align(Alignment.CenterHorizontally)
         ) {
@@ -465,25 +616,70 @@ fun MeditationScreen(navController: NavController) {
         }
     }
 }
+
 @Composable
 fun NavigationGraph(
     navController: NavHostController,
     currentPalette: PaletteOption,
-    onPaletteChange: (PaletteOption) -> Unit
+    sharedViewModel: SharedViewModel,
+    onPaletteChange: (PaletteOption) -> Unit,
+    userPreferences: UserPreferences
 ) {
     NavHost(navController, startDestination = "main") {
-        composable("main") { MainScreen(navController) }
-        composable("library") { MeditationLibraryScreen(navController) }
-        composable("music") { MusicScreen(navController) }
-        composable("progress") { ProgressScreen(navController) }
-        composable("profile") { ProfileScreen(navController, onPaletteChange) }
-        composable("meditation") { MeditationScreen(navController) }
+        composable("main") {
+            MainScreen(navController, sharedViewModel)
+        }
+        composable("library") {
+            MeditationLibraryScreen(navController, sharedViewModel)
+        }
+        composable("music") {
+            MusicScreen(navController, sharedViewModel)
+        }
+        composable("progress") {
+            ProgressScreen(navController)
+        }
+        composable("profile") { backStackEntry ->
+            val profileViewModel: ProfileViewModel = viewModel(
+                factory = ProfileViewModelFactory(userPreferences)
+            )
+            ProfileScreen(
+                navController = navController,
+                onPaletteChange = onPaletteChange,
+                sharedViewModel = sharedViewModel,
+                profileViewModel = profileViewModel
+            )
+        }
+        composable(
+            route = "meditation/{meditationId}",
+            arguments = listOf(navArgument("meditationId") { type = NavType.IntType })
+        ) { backStackEntry ->
+            val meditationId = backStackEntry.arguments?.getInt("meditationId")
+            MeditationScreen(navController, meditationId)
+        }
+    }
+}
+class SharedViewModel : ViewModel() {
+    private val _selectedItem = MutableStateFlow<Meditation?>(null)
+    val selectedItem: StateFlow<Meditation?> get() = _selectedItem
+
+    private val _userName = MutableStateFlow("")
+    val userName: StateFlow<String> get() = _userName
+
+    fun selectItem(item: Meditation?) {
+        _selectedItem.value = item
+    }
+
+    fun updateUserName(newName: String) {
+        _userName.value = newName
     }
 }
 
 @Composable
 fun MainScreenWithNav() {
     val navController = rememberNavController()
+    val sharedViewModel: SharedViewModel = viewModel()
+    val context = LocalContext.current
+    val userPreferences = UserPreferences(context.dataStore)
     var currentPalette by remember { mutableStateOf(PaletteOption.Option1) }
     val currentRoute = currentRoute(navController)
 
@@ -505,16 +701,21 @@ fun MainScreenWithNav() {
     CompositionLocalProvider(LocalPalette provides palette) {
         Scaffold(
             bottomBar = {
-                // BottomNavigationBar только если текущий экран НЕ "медитация"
-                if (currentRoute != "meditation") {
+                if (!currentRoute.contentEquals("meditation/")) {
                     BottomNavigationBar(navController)
                 }
             }
         ) { innerPadding ->
             Box(modifier = Modifier.padding(innerPadding)) {
-                NavigationGraph(navController, currentPalette) { newPalette ->
-                    currentPalette = newPalette
-                }
+                NavigationGraph(
+                    navController = navController,
+                    currentPalette = currentPalette,
+                    sharedViewModel = sharedViewModel,
+                    onPaletteChange = { newPalette ->
+                        currentPalette = newPalette
+                    },
+                    userPreferences = userPreferences
+                )
             }
         }
     }
