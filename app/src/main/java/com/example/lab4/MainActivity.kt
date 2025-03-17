@@ -18,8 +18,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -147,15 +150,34 @@ fun MainScreen(
 @Composable
 fun MeditationLibraryScreen(
     navController: NavController,
-    sharedViewModel: SharedViewModel
+    sharedViewModel: SharedViewModel,
+    repository: MeditationRepository,
+    viewModel: MeditationLibraryViewModel = viewModel(factory = MeditationViewModelFactory(repository))
 ) {
     val palette = LocalPalette.current
-    val viewModel: MeditationLibraryViewModel = viewModel()
     val meditations by viewModel.meditations.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedMeditation by sharedViewModel.selectedItem.collectAsState()
+    val meditationDetails by viewModel.meditationDetails.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+
+    //Детали об медитации
+    if (meditationDetails != null) {
+        MeditationDetailsDialog(
+            meditation = meditationDetails!!,
+            palette = palette,
+            onDismiss = { viewModel.clearSelectedMeditation() }
+        )
+    }
+
+    // Загружаем медитации при првом открытии экрана
+    LaunchedEffect(Unit) {
+        viewModel.loadMeditations()
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        // Поле поиска
         TextField(
             value = searchQuery,
             onValueChange = { viewModel.onSearchQueryChanged(it) },
@@ -165,37 +187,62 @@ fun MeditationLibraryScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(viewModel.getFilteredMeditations()) { meditation ->
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    MeditationItem(
-                        meditation = meditation,
-                        isSelected = selectedMeditation?.id == meditation.id,
-                        onSelected = {
-                            viewModel.onMeditationSelected(meditation)
-                            sharedViewModel.selectItem(meditation)
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Button(
-                        onClick = {
-                            viewModel.onMeditationSelected(meditation)
-                            sharedViewModel.selectItem(meditation)
-                            navController.navigate("meditation/${meditation.id}")
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = palette.primary)
+        // Индикатор загрузки
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+        // Сообщение об ошибке
+        else if (error != null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = error!!,
+                    color = Color.Red,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+        // Список медитаций
+        else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(viewModel.getFilteredMeditations()) { meditation ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(text = "Начать")
+                        // Блок медитации
+                        MeditationItem(
+                            meditation = meditation,
+                            isSelected = selectedMeditation?.id == meditation.id,
+                            onSelected = {
+                                viewModel.selectMeditation(meditation)
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = {
+                                viewModel.onMeditationSelected(meditation)
+                                sharedViewModel.selectItem(meditation)
+                                navController.navigate("meditation/${meditation.id}")
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = palette.primary)
+                        ) {
+                            Text(text = "Начать")
+                        }
                     }
                 }
             }
@@ -205,7 +252,7 @@ fun MeditationLibraryScreen(
 
 @Composable
 fun MeditationItem(
-    meditation: Meditation,
+    meditation: APIMeditation,
     isSelected: Boolean,
     onSelected: () -> Unit
 ) {
@@ -223,7 +270,7 @@ fun MeditationItem(
         Box(
             modifier = Modifier
                 .size(100.dp)
-                .background(backgroundColor, RoundedCornerShape(8.dp)),
+                .background(Color.LightGray, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(
@@ -235,7 +282,7 @@ fun MeditationItem(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = meditation.name,
+            text = meditation.title,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
@@ -246,6 +293,30 @@ fun MeditationItem(
     }
 }
 
+@Composable
+fun MeditationDetailsDialog(
+    meditation: APIMeditationDetail,
+    palette: AppPalette,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = meditation.title) },
+        text = {
+            Column {
+                Text(text = "Описание: ${meditation.description}")
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = "Длительность: ${meditation.duration} мин")
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = palette.secondary),) {
+                Text("Закрыть")
+            }
+        }
+    )
+}
 @Composable
 fun MusicScreen(
     navController: NavController,
@@ -567,7 +638,7 @@ val LocalPalette = staticCompositionLocalOf {
 @Composable
 fun MeditationScreen(
     navController: NavController,
-    meditationId: Int?,
+    meditationId: String?,
     viewModel: MeditationLibraryViewModel = viewModel()
 ) {
     val palette = LocalPalette.current
@@ -630,7 +701,15 @@ fun NavigationGraph(
             MainScreen(navController, sharedViewModel)
         }
         composable("library") {
-            MeditationLibraryScreen(navController, sharedViewModel)
+            val apiService = RetrofitClient.instance
+            val repository = MeditationRepository(apiService)
+
+            MeditationLibraryScreen(
+                navController = navController,
+                sharedViewModel = sharedViewModel,
+                repository = repository
+            )
+
         }
         composable("music") {
             MusicScreen(navController, sharedViewModel)
@@ -653,19 +732,19 @@ fun NavigationGraph(
             route = "meditation/{meditationId}",
             arguments = listOf(navArgument("meditationId") { type = NavType.IntType })
         ) { backStackEntry ->
-            val meditationId = backStackEntry.arguments?.getInt("meditationId")
+            val meditationId = backStackEntry.arguments?.getString("meditationId")
             MeditationScreen(navController, meditationId)
         }
     }
 }
 class SharedViewModel : ViewModel() {
-    private val _selectedItem = MutableStateFlow<Meditation?>(null)
-    val selectedItem: StateFlow<Meditation?> get() = _selectedItem
+    private val _selectedItem = MutableStateFlow<APIMeditation?>(null)
+    val selectedItem: StateFlow<APIMeditation?> get() = _selectedItem
 
     private val _userName = MutableStateFlow("")
     val userName: StateFlow<String> get() = _userName
 
-    fun selectItem(item: Meditation?) {
+    fun selectItem(item: APIMeditation?) {
         _selectedItem.value = item
     }
 
